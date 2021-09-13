@@ -73,6 +73,7 @@ package object xiangshan {
 
     def apply() = UInt(log2Up(num).W)
 
+    def isAluExu(fuType: UInt) = fuType === alu
     def isIntExu(fuType: UInt) = !fuType(3)
     def isJumpExu(fuType: UInt) = fuType === jmp
     def isFpExu(fuType: UInt) = fuType(3, 2) === "b10".U

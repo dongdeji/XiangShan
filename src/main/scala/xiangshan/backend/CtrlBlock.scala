@@ -195,8 +195,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
     // redirect out
     val redirect = ValidIO(new Redirect)
     val flush = Output(Bool())
-    val readIntRf = Vec(NRIntReadPorts, Output(UInt(PhyRegIdxWidth.W)))
-    val readFpRf = Vec(NRFpReadPorts, Output(UInt(PhyRegIdxWidth.W)))
     val debug_int_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
     val debug_fp_rat = Vec(32, Output(UInt(PhyRegIdxWidth.W)))
   })
@@ -204,7 +202,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   val decode = Module(new DecodeStage)
   val rename = Module(new Rename)
   val dispatch = Module(new Dispatch)
-  val intBusyTable = Module(new BusyTable(NRIntReadPorts, NRIntWritePorts))
+  val intBusyTable = Module(new BusyTable(NRIntReadPorts + 2 * exuParameters.MduCnt, NRIntWritePorts))
   val fpBusyTable = Module(new BusyTable(NRFpReadPorts, NRFpWritePorts))
   val redirectGen = Module(new RedirectGenerator)
 
@@ -276,7 +274,7 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   decode.io.csrCtrl := RegNext(io.csrCtrl)
 
 
-  val jumpInst = dispatch.io.enqIQCtrl(0).bits
+  val jumpInst = dispatch.io.enqIQCtrl(exuParameters.AluCnt).bits
   val jumpPcRead = io.frontend.fromFtq.getJumpPcRead
   io.jumpPc := jumpPcRead(jumpInst.cf.ftqPtr, jumpInst.cf.ftqOffset)
   val jumpTargetRead = io.frontend.fromFtq.target_read
@@ -310,8 +308,6 @@ class CtrlBlock(implicit p: Parameters) extends XSModule
   io.enqIQ <> dispatch.io.enqIQCtrl
   dispatch.io.csrCtrl <> io.csrCtrl
   dispatch.io.storeIssue <> io.stIn
-  dispatch.io.readIntRf <> io.readIntRf
-  dispatch.io.readFpRf <> io.readFpRf
 
   fpBusyTable.io.flush := flushReg
   intBusyTable.io.flush := flushReg

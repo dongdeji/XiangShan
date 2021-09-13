@@ -26,7 +26,6 @@ import xiangshan.backend.rename.BusyTableReadIO
 class Dispatch2Fp(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.FpDqDeqWidth, DecoupledIO(new MicroOp)))
-    val readRf = Vec(NRFpReadPorts - exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
     val readState = Vec(NRFpReadPorts - exuParameters.StuCnt, Flipped(new BusyTableReadIO))
     val enqIQCtrl = Vec(exuParameters.FmacCnt, DecoupledIO(new MicroOp))
   })
@@ -36,9 +35,6 @@ class Dispatch2Fp(implicit p: Parameters) extends XSModule {
   io.enqIQCtrl <> DontCare
   for (i <- 0 until exuParameters.FmacCnt) {
     io.enqIQCtrl(i) <> io.fromDq(i)
-    io.readRf(3*i) := io.enqIQCtrl(i).bits.psrc(0)
-    io.readRf(3*i+1) := io.enqIQCtrl(i).bits.psrc(1)
-    io.readRf(3*i+2) := io.enqIQCtrl(i).bits.psrc(2)
 
     io.readState(3*i  ).req := io.fromDq(i).bits.psrc(0)
     io.readState(3*i+1).req := io.fromDq(i).bits.psrc(1)

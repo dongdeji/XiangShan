@@ -27,8 +27,6 @@ import xiangshan.backend.rename.BusyTableReadIO
 class Dispatch2Ls(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.LsDqDeqWidth, DecoupledIO(new MicroOp)))
-    val readIntRf = Vec(NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
-    val readFpRf = Vec(exuParameters.StuCnt, Output(UInt(PhyRegIdxWidth.W)))
     val readIntState = Vec(NRMemReadPorts, Flipped(new BusyTableReadIO))
     val readFpState = Vec(exuParameters.StuCnt, Flipped(new BusyTableReadIO))
     val enqIQCtrl = Vec(exuParameters.LsExuCnt, DecoupledIO(new MicroOp))
@@ -66,16 +64,6 @@ class Dispatch2Ls(implicit p: Parameters) extends XSModule {
   val readPort = Seq(0, 1, 2, 4)
   val firstStorePsrc2 = PriorityMux(storeCanAccept, io.fromDq.map(_.bits.psrc(1)))
   val secondStorePsrc2 = PriorityMux((1 until 4).map(i => Cat(storeCanAccept.take(i)).orR && storeCanAccept(i)), io.fromDq.drop(1).map(_.bits.psrc(1)))
-  for (i <- 0 until exuParameters.LsExuCnt) {
-    if (i < exuParameters.LduCnt) {
-      io.readIntRf(readPort(i)) := io.fromDq(indexVec(i)).bits.psrc(0)
-    }
-    else {
-      io.readFpRf(i - exuParameters.LduCnt) := io.fromDq(indexVec(i)).bits.psrc(1)
-      io.readIntRf(readPort(i)  ) := io.fromDq(indexVec(i)).bits.psrc(0)
-      io.readIntRf(readPort(i)+1) := io.fromDq(indexVec(i)).bits.psrc(1)
-    }
-  }
   // src1 always needs srcState but only store's src2 needs srcState
   for (i <- 0 until 4) {
     io.readIntState(i).req := io.fromDq(i).bits.psrc(0)
@@ -133,33 +121,6 @@ class Dispatch2Ls(implicit p: Parameters) extends XSModule {
       p"pc 0x${Hexadecimal(io.fromDq(i).bits.cf.pc)} waits at Ls dispatch queue with index $i\n")
   }
   XSError(PopCount(io.fromDq.map(_.fire())) =/= PopCount(io.enqIQCtrl.map(_.fire())), "deq =/= enq\n")
-
-  /**
-    * Part 5: the second stage of dispatch 2 (send data to reservation station)
-    */
-//  val uopReg = Reg(Vec(exuParameters.LsExuCnt, new MicroOp))
-//  val dataValidRegDebug = Reg(Vec(exuParameters.LsExuCnt, Bool()))
-//  for (i <- 0 until exuParameters.LsExuCnt) {
-//    uopReg(i) := io.enqIQCtrl(i).bits
-//    dataValidRegDebug(i) := io.enqIQCtrl(i).fire()
-//
-//    io.enqIQData(i) := DontCare
-//    // assert(uopReg(i).ctrl.srcType(0) =/= SrcType.pc)
-//    io.enqIQData(i).src(0) := io.readIntRf(readPort(i)).data
-//    if (i >= exuParameters.LduCnt) {
-//      io.enqIQData(i).src(1) := Mux(
-//        uopReg(i).ctrl.srcType(1) === SrcType.imm,
-//        uopReg(i).ctrl.imm,
-//        Mux(uopReg(i).ctrl.srcType(1) === SrcType.fp,
-//          io.readFpRf(i - exuParameters.LduCnt).data,
-//          io.readIntRf(readPort(i) + 1).data))
-//    }
-//
-//    XSDebug(dataValidRegDebug(i),
-//      p"pc 0x${Hexadecimal(uopReg(i).cf.pc)} reads operands from " +
-//        p"(${readPort(i)  }, ${uopReg(i).psrc(0)}, ${Hexadecimal(io.enqIQData(i).src(0))}), " +
-//        p"(${readPort(i)+1}, ${uopReg(i).psrc(1)}, ${Hexadecimal(io.enqIQData(i).src(1))})\n")
-//  }
 
   XSPerfAccumulate("in", PopCount(io.fromDq.map(_.valid)))
   XSPerfAccumulate("out", PopCount(io.enqIQCtrl.map(_.fire())))

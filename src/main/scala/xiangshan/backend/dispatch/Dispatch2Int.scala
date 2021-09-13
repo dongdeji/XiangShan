@@ -26,7 +26,6 @@ import xiangshan.backend.rename.BusyTableReadIO
 class Dispatch2Int(implicit p: Parameters) extends XSModule {
   val io = IO(new Bundle() {
     val fromDq = Flipped(Vec(dpParams.IntDqDeqWidth, DecoupledIO(new MicroOp)))
-    val readRf = Vec(NRIntReadPorts - NRMemReadPorts, Output(UInt(PhyRegIdxWidth.W)))
     val readState = Vec(NRIntReadPorts - NRMemReadPorts, Flipped(new BusyTableReadIO))
     val enqIQCtrl = Vec(exuParameters.AluCnt, DecoupledIO(new MicroOp))
   })
@@ -40,8 +39,6 @@ class Dispatch2Int(implicit p: Parameters) extends XSModule {
       io.enqIQCtrl(i).valid := io.fromDq(i).valid && !FuType.jmpCanAccept(io.fromDq(i).bits.ctrl.fuType)
       io.fromDq(i).ready := io.enqIQCtrl(i).ready && !FuType.jmpCanAccept(io.fromDq(i).bits.ctrl.fuType)
     }
-    io.readRf(2*i) := io.enqIQCtrl(i).bits.psrc(0)
-    io.readRf(2*i + 1) := io.enqIQCtrl(i).bits.psrc(1)
 
     io.readState(2*i  ).req := io.fromDq(i).bits.psrc(0)
     io.readState(2*i+1).req := io.fromDq(i).bits.psrc(1)
@@ -59,6 +56,27 @@ class Dispatch2Int(implicit p: Parameters) extends XSModule {
 
   for (i <- exuParameters.AluCnt until dpParams.IntDqDeqWidth) {
     io.fromDq(i).ready := false.B
+  }
+
+}
+
+class Dispatch2Misc(implicit p: Parameters) extends XSModule {
+  val io = IO(new Bundle() {
+    val fromDq = Flipped(Vec(exuParameters.MduCnt, DecoupledIO(new MicroOp)))
+    val readState = Vec(exuParameters.MduCnt * 2, Flipped(new BusyTableReadIO))
+    val enqIQCtrl = Vec(exuParameters.MduCnt, DecoupledIO(new MicroOp))
+  })
+
+  for (i <- 0 until exuParameters.MduCnt) {
+    io.enqIQCtrl(i) <> io.fromDq(i)
+    if (i > 0) {
+      io.enqIQCtrl(i).valid := io.fromDq(i).valid && !FuType.jmpCanAccept(io.fromDq(i).bits.ctrl.fuType)
+      io.fromDq(i).ready := io.enqIQCtrl(i).ready && !FuType.jmpCanAccept(io.fromDq(i).bits.ctrl.fuType)
+    }
+    io.readState(2*i  ).req := io.fromDq(i).bits.psrc(0)
+    io.readState(2*i+1).req := io.fromDq(i).bits.psrc(1)
+    io.enqIQCtrl(i).bits.srcState(0) := io.readState(i * 2).resp
+    io.enqIQCtrl(i).bits.srcState(1) := io.readState(i * 2 + 1).resp
   }
 
 }

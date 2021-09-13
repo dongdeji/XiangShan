@@ -45,8 +45,13 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     // enq Lsq
     val enqLsq = Flipped(new LsqEnqIO)
     val allocPregs = Vec(RenameWidth, Output(new ReplayPregReq))
-    // to dispatch queue
-    val toIntDq = new Bundle {
+    // to dispatch queues
+    val toAluDq = new Bundle {
+      val canAccept = Input(Bool())
+      val needAlloc = Vec(RenameWidth, Output(Bool()))
+      val req = Vec(RenameWidth, ValidIO(new MicroOp))
+    }
+    val toMiscDq = new Bundle {
       val canAccept = Input(Bool())
       val needAlloc = Vec(RenameWidth, Output(Bool()))
       val req = Vec(RenameWidth, ValidIO(new MicroOp))
@@ -92,6 +97,8 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     */
   // valid bits for different dispatch queues
   val isInt    = VecInit(io.fromRename.map(req => FuType.isIntExu(req.bits.ctrl.fuType)))
+  val isAlu = VecInit(io.fromRename.map(req => FuType.isAluExu(req.bits.ctrl.fuType)))
+  val isMisc = VecInit(io.fromRename.zip(isInt).map(req => req._2 && !FuType.isAluExu(req._1.bits.ctrl.fuType)))
   val isBranch = VecInit(io.fromRename.map(req =>
     // cover auipc (a fake branch)
     !req.bits.cf.pd.notCFI || FuType.isJumpExu(req.bits.ctrl.fuType)
@@ -224,7 +231,7 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     *   acquire ROQ (all), LSQ (load/store only) and dispatch queue slots
     *   only set valid when all of them provides enough entries
     */
-  val allResourceReady = io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+  val allResourceReady = io.enqLsq.canAccept && io.enqRoq.canAccept && io.toAluDq.canAccept && io.toMiscDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
 
   // Instructions should enter dispatch queues in order.
   // thisIsBlocked: this instruction is blocked by itself (based on noSpecExec)
@@ -254,12 +261,12 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
   // input for ROQ, LSQ, Dispatch Queue
   for (i <- 0 until RenameWidth) {
     io.enqRoq.needAlloc(i) := io.fromRename(i).valid
-    io.enqRoq.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i) && io.enqLsq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+    io.enqRoq.req(i).valid := io.fromRename(i).valid && thisCanActualOut(i) && io.enqLsq.canAccept && io.toAluDq.canAccept && io.toMiscDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
     io.enqRoq.req(i).bits := updatedUop(i)
     XSDebug(io.enqRoq.req(i).valid, p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)} receives nroq ${io.enqRoq.resp(i)}\n")
 
     io.enqLsq.needAlloc(i) := Mux(io.fromRename(i).valid, io.preDpInfo.lsqNeedAlloc(i), 0.U)
-    io.enqLsq.req(i).valid := io.fromRename(i).valid && isLs(i) && thisCanActualOut(i) && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+    io.enqLsq.req(i).valid := io.fromRename(i).valid && isLs(i) && thisCanActualOut(i) && io.enqRoq.canAccept && io.toAluDq.canAccept && io.toMiscDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
     io.enqLsq.req(i).bits := updatedUop(i)
     io.enqLsq.req(i).bits.roqIdx := io.enqRoq.resp(i)
     XSDebug(io.enqLsq.req(i).valid,
@@ -269,27 +276,33 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     // Note that if one of their previous instructions cannot enqueue, they should not enter dispatch queue.
     // We use notBlockedByPrevious here.
     if (EnableIntMoveElim) {
-      io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i) && !io.fromRename(i).bits.eliminatedMove
-      io.toIntDq.req(i).valid := io.fromRename(i).valid && !hasException(i) && isInt(i) && thisCanActualOut(i) &&
-                             io.enqLsq.canAccept && io.enqRoq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept && !io.fromRename(i).bits.eliminatedMove
+      io.toAluDq.needAlloc(i) := io.fromRename(i).valid && isAlu(i) && !io.fromRename(i).bits.eliminatedMove
+      io.toAluDq.req(i).valid := io.fromRename(i).valid && !hasException(i) && isAlu(i) && thisCanActualOut(i) &&
+                             io.enqLsq.canAccept && io.enqRoq.canAccept && io.toMiscDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept && !io.fromRename(i).bits.eliminatedMove
     } else {
-      io.toIntDq.needAlloc(i) := io.fromRename(i).valid && isInt(i)
-      io.toIntDq.req(i).valid := io.fromRename(i).valid && !hasException(i) && isInt(i) && thisCanActualOut(i) &&
-                             io.enqLsq.canAccept && io.enqRoq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+      io.toAluDq.needAlloc(i) := io.fromRename(i).valid && isAlu(i)
+      io.toAluDq.req(i).valid := io.fromRename(i).valid && !hasException(i) && isAlu(i) && thisCanActualOut(i) &&
+                             io.enqLsq.canAccept && io.enqRoq.canAccept && io.toMiscDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
     }
-    io.toIntDq.req(i).bits  := updatedUop(i)
+    io.toAluDq.req(i).bits  := updatedUop(i)
+
+    io.toMiscDq.needAlloc(i) := io.fromRename(i).valid && isMisc(i)
+    io.toMiscDq.req(i).valid := io.fromRename(i).valid && !hasException(i) && isMisc(i) && thisCanActualOut(i) &&
+                            io.enqLsq.canAccept && io.enqRoq.canAccept && io.toAluDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+    io.toMiscDq.req(i).bits := updatedUop(i)
 
     io.toFpDq.needAlloc(i)  := io.fromRename(i).valid && isFp(i)
     io.toFpDq.req(i).bits   := updatedUop(i)
     io.toFpDq.req(i).valid  := io.fromRename(i).valid && !hasException(i) && isFp(i) && thisCanActualOut(i) &&
-                           io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toLsDq.canAccept
+                           io.enqLsq.canAccept && io.enqRoq.canAccept && io.toAluDq.canAccept && io.toMiscDq.canAccept && io.toLsDq.canAccept
 
     io.toLsDq.needAlloc(i)  := io.fromRename(i).valid && isMem(i)
     io.toLsDq.req(i).bits   := updatedUop(i)
     io.toLsDq.req(i).valid  := io.fromRename(i).valid && !hasException(i) && isMem(i) && thisCanActualOut(i) &&
-                           io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept
+                           io.enqLsq.canAccept && io.enqRoq.canAccept && io.toAluDq.canAccept && io.toMiscDq.canAccept && io.toFpDq.canAccept
 
-    XSDebug(io.toIntDq.req(i).valid, p"pc 0x${Hexadecimal(io.toIntDq.req(i).bits.cf.pc)} int index $i\n")
+    XSDebug(io.toAluDq.req(i).valid, p"pc 0x${Hexadecimal(io.toAluDq.req(i).bits.cf.pc)} alu index $i\n")
+    XSDebug(io.toMiscDq.req(i).valid, p"pc 0x${Hexadecimal(io.toMiscDq.req(i).bits.cf.pc)} misc index $i\n")
     XSDebug(io.toFpDq.req(i).valid , p"pc 0x${Hexadecimal(io.toFpDq.req(i).bits.cf.pc )} fp  index $i\n")
     XSDebug(io.toLsDq.req(i).valid , p"pc 0x${Hexadecimal(io.toLsDq.req(i).bits.cf.pc )} ls  index $i\n")
   }
@@ -300,11 +313,11 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
   val hasValidInstr = VecInit(io.fromRename.map(_.valid)).asUInt.orR
   val hasSpecialInstr = Cat((0 until RenameWidth).map(i => io.fromRename(i).valid && (isBlockBackward(i) || isNoSpecExec(i)))).orR
   for (i <- 0 until RenameWidth) {
-    io.recv(i) := thisCanActualOut(i) && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
-    io.fromRename(i).ready := !hasValidInstr || !hasSpecialInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+    io.recv(i) := thisCanActualOut(i) && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toAluDq.canAccept && io.toMiscDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
+    io.fromRename(i).ready := !hasValidInstr || !hasSpecialInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toAluDq.canAccept && io.toMiscDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept
 
     XSInfo(io.recv(i) && io.fromRename(i).valid,
-      p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)}, type(${isInt(i)}, ${isFp(i)}, ${isLs(i)}), " +
+      p"pc 0x${Hexadecimal(io.fromRename(i).bits.cf.pc)}, type(${isAlu(i)}, ${isFp(i)}, ${isLs(i)}), " +
       p"roq ${updatedUop(i).roqIdx}, lq ${updatedUop(i).lqIdx}, sq ${updatedUop(i).sqIdx})\n"
     )
 
@@ -317,7 +330,8 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
     io.allocPregs(i).preg  := io.fromRename(i).bits.pdest
   }
   val renameFireCnt = PopCount(io.recv)
-  val enqFireCnt = PopCount(io.toIntDq.req.map(_.valid && io.toIntDq.canAccept)) +
+  val enqFireCnt = PopCount(io.toAluDq.req.map(_.valid && io.toAluDq.canAccept)) +
+    PopCount(io.toMiscDq.req.map(_.valid && io.toMiscDq.canAccept)) +
     PopCount(io.toFpDq.req.map(_.valid && io.toFpDq.canAccept)) +
     PopCount(io.toLsDq.req.map(_.valid && io.toLsDq.canAccept))
   XSError(enqFireCnt > renameFireCnt, "enqFireCnt should not be greater than renameFireCnt\n")
@@ -326,9 +340,10 @@ class Dispatch1(implicit p: Parameters) extends XSModule with HasExceptionNO {
   XSPerfAccumulate("empty", !hasValidInstr)
   XSPerfAccumulate("utilization", PopCount(io.fromRename.map(_.valid)))
   XSPerfAccumulate("waitInstr", PopCount((0 until RenameWidth).map(i => io.fromRename(i).valid && !io.recv(i))))
-  XSPerfAccumulate("stall_cycle_lsq", hasValidInstr && !io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerfAccumulate("stall_cycle_roq", hasValidInstr && io.enqLsq.canAccept && !io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerfAccumulate("stall_cycle_int_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && !io.toIntDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerfAccumulate("stall_cycle_fp_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
-  XSPerfAccumulate("stall_cycle_ls_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toIntDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_lsq", hasValidInstr && !io.enqLsq.canAccept && io.enqRoq.canAccept && io.toAluDq.canAccept && io.toMiscDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_roq", hasValidInstr && io.enqLsq.canAccept && !io.enqRoq.canAccept && io.toAluDq.canAccept && io.toMiscDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_alu_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && !io.toAluDq.canAccept && io.toMiscDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_misc_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toAluDq.canAccept && !io.toMiscDq.canAccept && io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_fp_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toAluDq.canAccept && io.toMiscDq.canAccept && !io.toFpDq.canAccept && io.toLsDq.canAccept)
+  XSPerfAccumulate("stall_cycle_ls_dq", hasValidInstr && io.enqLsq.canAccept && io.enqRoq.canAccept && io.toAluDq.canAccept && io.toMiscDq.canAccept && io.toFpDq.canAccept && !io.toLsDq.canAccept)
 }

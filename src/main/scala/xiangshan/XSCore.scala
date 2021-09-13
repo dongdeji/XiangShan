@@ -243,20 +243,20 @@ class XSCoreImp(outer: XSCoreBase) extends LazyModuleImp(outer)
   val fpFastUop1 = outer.fpArbiter.allConnections.map(c => fpFastUop(c.head))
   val allFastUop1 = intFastUop1 ++ fpFastUop1
 
-  ctrlBlock.io.enqIQ <> exuBlocks(0).io.allocate ++ exuBlocks(2).io.allocate ++ memScheduler.io.allocate
-  for (i <- 0 until exuParameters.MduCnt) {
-    val rsIn = VecInit(Seq(exuBlocks(0).io.allocate(i), exuBlocks(1).io.allocate(i)))
-    val func1 = (op: MicroOp) => outer.exuBlocks(0).scheduler.canAccept(op.ctrl.fuType)
-    val func2 = (op: MicroOp) => outer.exuBlocks(1).scheduler.canAccept(op.ctrl.fuType)
-    val arbiterOut = DispatchArbiter(ctrlBlock.io.enqIQ(i), Seq(func1, func2))
-    rsIn <> arbiterOut
-  }
-  for (i <- exuParameters.MduCnt until exuParameters.AluCnt) {
-    val rsIn = exuBlocks(0).io.allocate(i)
-    val dpOut = ctrlBlock.io.enqIQ(i)
-    rsIn.valid := dpOut.valid && outer.exuBlocks(0).scheduler.canAccept(dpOut.bits.ctrl.fuType)
-    dpOut.ready := rsIn.ready && outer.exuBlocks(0).scheduler.canAccept(dpOut.bits.ctrl.fuType)
-  }
+  ctrlBlock.io.enqIQ <> exuBlocks(0).io.allocate ++ exuBlocks(1).io.allocate.take(exuParameters.MduCnt) ++ exuBlocks(2).io.allocate ++ memScheduler.io.allocate
+//  for (i <- 0 until exuParameters.MduCnt) {
+//    val rsIn = VecInit(Seq(exuBlocks(0).io.allocate(i), exuBlocks(1).io.allocate(i)))
+//    val func1 = (op: MicroOp) => outer.exuBlocks(0).scheduler.canAccept(op.ctrl.fuType)
+//    val func2 = (op: MicroOp) => outer.exuBlocks(1).scheduler.canAccept(op.ctrl.fuType)
+//    val arbiterOut = DispatchArbiter(ctrlBlock.io.enqIQ(i), Seq(func1, func2))
+//    rsIn <> arbiterOut
+//  }
+//  for (i <- exuParameters.MduCnt until exuParameters.AluCnt) {
+//    val rsIn = exuBlocks(0).io.allocate(i)
+//    val dpOut = ctrlBlock.io.enqIQ(i)
+//    rsIn.valid := dpOut.valid && outer.exuBlocks(0).scheduler.canAccept(dpOut.bits.ctrl.fuType)
+//    dpOut.ready := rsIn.ready && outer.exuBlocks(0).scheduler.canAccept(dpOut.bits.ctrl.fuType)
+//  }
 
   val stdAllocate = exuBlocks(1).io.allocate.takeRight(2)
   val staAllocate = memScheduler.io.allocate.takeRight(2)

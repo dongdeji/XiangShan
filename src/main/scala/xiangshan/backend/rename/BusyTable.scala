@@ -50,7 +50,7 @@ class BusyTable(numReadPorts: Int, numWritePorts: Int)(implicit p: Parameters) e
   val tableAfterWb = table & (~wbMask).asUInt
   val tableAfterAlloc = tableAfterWb | allocMask
 
-  io.read.map(r => r.resp := !table(r.req))
+  io.read.foreach(r => r.resp := !table(r.req))
 
   table := tableAfterAlloc
 

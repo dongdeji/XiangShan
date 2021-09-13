@@ -51,11 +51,8 @@ class Dispatch(implicit p: Parameters) extends XSModule {
     val enqRoq = Flipped(new RoqEnqIO)
     // enq Lsq
     val enqLsq = Flipped(new LsqEnqIO)
-    // read regfile
-    val readIntRf = Vec(NRIntReadPorts, Output(UInt(PhyRegIdxWidth.W)))
-    val readFpRf = Vec(NRFpReadPorts, Output(UInt(PhyRegIdxWidth.W)))
     // to busytable: read physical registers' state (busy/ready)
-    val readIntState= Vec(NRIntReadPorts, Flipped(new BusyTableReadIO))
+    val readIntState= Vec(NRIntReadPorts + 2 * exuParameters.MduCnt, Flipped(new BusyTableReadIO))
     val readFpState = Vec(NRFpReadPorts, Flipped(new BusyTableReadIO))
     // to reservation stations
     val enqIQCtrl = Vec(exuParameters.CriticalExuCnt, DecoupledIO(new MicroOp))
@@ -75,6 +72,7 @@ class Dispatch(implicit p: Parameters) extends XSModule {
 
   val dispatch1 = Module(new Dispatch1)
   val intDq = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, dpParams.IntDqDeqWidth, "int"))
+  val miscDq = Module(new DispatchQueue(dpParams.IntDqSize, RenameWidth, exuParameters.MduCnt, "misc"))
   val fpDq = Module(new DispatchQueue(dpParams.FpDqSize, RenameWidth, dpParams.FpDqDeqWidth, "fp"))
   val lsDq = Module(new DispatchQueue(dpParams.LsDqSize, RenameWidth, dpParams.LsDqDeqWidth, "ls"))
 
@@ -91,7 +89,8 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   dispatch1.io.preDpInfo := RegEnable(io.preDpInfo, io.fromRename(0).valid && dispatch1.io.fromRename(0).ready)
   dispatch1.io.enqRoq <> io.enqRoq
   dispatch1.io.enqLsq <> io.enqLsq
-  dispatch1.io.toIntDq <> intDq.io.enq
+  dispatch1.io.toAluDq <> intDq.io.enq
+  dispatch1.io.toMiscDq <> miscDq.io.enq
   dispatch1.io.toFpDq <> fpDq.io.enq
   dispatch1.io.toLsDq <> lsDq.io.enq
   dispatch1.io.allocPregs <> io.allocPregs
@@ -105,6 +104,8 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   // it may cancel the uops
   intDq.io.redirect <> io.redirect
   intDq.io.flush <> io.flush
+  miscDq.io.redirect <> io.redirect
+  miscDq.io.flush <> io.flush
   fpDq.io.redirect <> io.redirect
   fpDq.io.flush <> io.flush
   lsDq.io.redirect <> io.redirect
@@ -114,6 +115,9 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   val intDispatch = Module(new Dispatch2Int)
   intDispatch.io.fromDq <> intDq.io.deq
 
+  val miscDispatch = Module(new Dispatch2Misc)
+  miscDispatch.io.fromDq <> miscDq.io.deq
+
   // Fp dispatch queue to Fp reservation stations
   val fpDispatch = Module(new Dispatch2Fp)
   fpDispatch.io.fromDq <> fpDq.io.deq
@@ -122,10 +126,8 @@ class Dispatch(implicit p: Parameters) extends XSModule {
   val lsDispatch = Module(new Dispatch2Ls)
   lsDispatch.io.fromDq <> lsDq.io.deq
 
-  io.enqIQCtrl <> intDispatch.io.enqIQCtrl ++ fpDispatch.io.enqIQCtrl ++ lsDispatch.io.enqIQCtrl
-  io.readIntRf <> intDispatch.io.readRf ++ lsDispatch.io.readIntRf
-  io.readIntState <> intDispatch.io.readState ++ lsDispatch.io.readIntState
-  io.readFpRf <> fpDispatch.io.readRf ++ lsDispatch.io.readFpRf
+  io.enqIQCtrl <> intDispatch.io.enqIQCtrl ++ miscDispatch.io.enqIQCtrl ++ fpDispatch.io.enqIQCtrl ++ lsDispatch.io.enqIQCtrl
+  io.readIntState <> intDispatch.io.readState ++ miscDispatch.io.readState ++ lsDispatch.io.readIntState
   io.readFpState <> fpDispatch.io.readState ++ lsDispatch.io.readFpState
 
   io.ctrlInfo <> DontCare

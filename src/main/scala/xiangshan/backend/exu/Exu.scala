@@ -46,7 +46,7 @@ case class ExuParameters
 
   def ExuCnt = IntExuCnt + FpExuCnt + LduCnt + StuCnt
 
-  def CriticalExuCnt = AluCnt + FmacCnt + LsExuCnt
+  def CriticalExuCnt = AluCnt + MduCnt + FmacCnt + LsExuCnt
 }
 
 case class ExuConfig
