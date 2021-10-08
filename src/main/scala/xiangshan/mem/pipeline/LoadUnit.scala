@@ -31,6 +31,7 @@ class LoadToLsqIO(implicit p: Parameters) extends XSBundle {
   val loadDataForwarded = Output(Bool())
   val needReplayFromRS = Output(Bool())
   val forward = new PipeLoadForwardQueryIO
+  val loadViolationQuery = new LoadViolationQueryIO
 }
 
 class LoadToLoadIO(implicit p: Parameters) extends XSBundle {
@@ -140,6 +141,7 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
     val fullForwardFast = Output(Bool())
     val sbuffer = new LoadForwardQueryIO
     val lsq = new PipeLoadForwardQueryIO
+    val loadViolationQuery = new LoadViolationQueryIO
   })
 
   val s1_uop = io.in.bits.uop
@@ -174,6 +176,12 @@ class LoadUnit_S1(implicit p: Parameters) extends XSModule {
   io.lsq.sqIdxMask := DontCare // will be overwritten by sqIdxMask pre-generated in s0
   io.lsq.mask := s1_mask
   io.lsq.pc := s1_uop.cf.pc // FIXME: remove it
+
+  // ld-ld violation query
+  io.loadViolationQuery.req.valid := io.in.valid && !(s1_exception || s1_tlb_miss)
+  io.loadViolationQuery.req.bits.paddr := s1_paddr
+  io.loadViolationQuery.req.bits.uop := s1_uop
+  io.out.bits.uop.ctrl.replayInst := !io.loadViolationQuery.req.ready && io.loadViolationQuery.req.valid
 
   // Generate forwardMaskFast to wake up insts earlier
   val forwardMaskFast = io.lsq.forwardMaskFast.asUInt | io.sbuffer.forwardMaskFast.asUInt
@@ -286,7 +294,8 @@ class LoadUnit_S2(implicit p: Parameters) extends XSModule with HasLoadHelper {
   }
   io.out.bits.uop.ctrl.fpWen := io.in.bits.uop.ctrl.fpWen && !s2_exception
   // if forward fail, replay this inst
-  io.out.bits.uop.ctrl.replayInst := s2_forward_fail && !s2_mmio
+  io.out.bits.uop.ctrl.replayInst := io.in.bits.uop.ctrl.replayInst ||
+    s2_forward_fail && !s2_mmio
   io.out.bits.mmio := s2_mmio
 
   // For timing reasons, sometimes we can not let
@@ -380,6 +389,7 @@ class LoadUnit(implicit p: Parameters) extends XSModule with HasLoadHelper {
   io.dcache.s1_kill <> load_s1.io.dcacheKill
   load_s1.io.sbuffer <> io.sbuffer
   load_s1.io.lsq <> io.lsq.forward
+  load_s1.io.loadViolationQuery <> io.lsq.loadViolationQuery
 
   PipelineConnect(load_s1.io.out, load_s2.io.in, true.B, load_s1.io.out.bits.uop.robIdx.needFlush(io.redirect, io.flush))
 

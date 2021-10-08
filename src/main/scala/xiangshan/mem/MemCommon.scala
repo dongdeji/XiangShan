@@ -113,3 +113,20 @@ class PipeLoadForwardQueryIO(implicit p: Parameters) extends LoadForwardQueryIO 
   val dataInvalidFast = Input(Bool()) // resp to load_s1
   // val dataInvalid = Input(Bool()) // resp to load_s2
 }
+
+// Query load queue for ld-ld violation
+// 
+// Req should be send in load_s1
+// Resp will be generated 1 cycle later
+//
+// Note that query req may be !ready, as dcache is releasing a block
+// If it happens, a replay from rs is needed.
+class LoadViolationQueryIO(implicit p: Parameters) extends XSBundle {
+  val req = Decoupled(new Bundle{
+    val paddr = UInt(PAddrBits.W)
+    val uop = new MicroOp // provide lqIdx
+  })
+  val resp = Flipped(Valid(new Bundle{
+    val have_violation = Bool()
+  }))
+}

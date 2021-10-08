@@ -235,6 +235,14 @@ class Refill(implicit p: Parameters) extends DCacheBundle
   }
 }
 
+class Release(implicit p: Parameters) extends DCacheBundle
+{
+  val paddr  = UInt(PAddrBits.W)
+  def dump() = {
+    XSDebug("Release: paddr: %x\n", paddr(PAddrBits-1, DCacheTagOffset))
+  }
+}
+
 class DCacheWordIO(implicit p: Parameters) extends DCacheBundle
 {
   val req  = DecoupledIO(new DCacheWordReq)
