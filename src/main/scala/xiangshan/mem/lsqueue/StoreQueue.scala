@@ -437,8 +437,15 @@ class StoreQueue(implicit p: Parameters) extends XSModule with HasDCacheParamete
   XSError(uncacheState =/= s_idle && uncacheState =/= s_wait && commitCount > 0.U,
    "should not commit instruction when MMIO has not been finished\n")
   for (i <- 0 until CommitWidth) {
-    when (commitCount > i.U && uncacheState === s_idle) { // MMIO inst is not in progress
+    when (commitCount > i.U) { // MMIO inst is not in progress
       commited(cmtPtrExt(i).value) := true.B
+      if(i == 0){
+        // MMIO inst should not update commited flag
+        // Note that commit count has been delayed for 1 cycle
+        when(RegNext(uncacheState === s_idle)){
+          commited(cmtPtrExt(0).value) := true.B
+        }
+      }
     }
   }
   cmtPtrExt := cmtPtrExt.map(_ + commitCount)
